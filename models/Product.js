@@ -1,18 +1,12 @@
 const mongoose = require("mongoose");
 
-// ─── All valid categories including Pujan Samagri subcategories ───────────────
 const VALID_CATEGORIES = [
-  // Main categories
   "Fashion", "Hardware & Tools", "Electronics", "Home & Kitchen Care",
   "Stationary", "Organisers", "Toys", "Decoration", "Gifting Products",
   "Jewellery", "Gardening", "KIDS Accessories", "Women Accessories",
   "Beauty & Body Care",
-
-  // Pujan Samagri + subcategories
   "Pujan Samagri", "Laddu Gopal Shringar", "Hanuman Ji Vastra",
   "Radha Krishna Vastra", "Ganesh Ji Vastra", "Mata Chunri",
-
-  // Seasonable
   "Holi", "Raksha Bandhan", "Summer", "Winter", "Rainy",
 ];
 
@@ -26,11 +20,21 @@ const productSchema = new mongoose.Schema({
     type:    String,
     default: "",
   },
-  category: {
-    type:     String,
-    required: [true, "Category is required"],
-    enum:     VALID_CATEGORIES,
+
+  // ✅ MULTI-CATEGORY: array — product appears in all selected categories
+  categories: {
+    type:    [String],
+    enum:    VALID_CATEGORIES,
+    default: [],
   },
+
+  // ✅ Keep single category for backward compat — always = categories[0]
+  category: {
+    type:    String,
+    enum:    VALID_CATEGORIES,
+    default: "",
+  },
+
   brand: {
     type:    String,
     default: "PoojaStore4u",
@@ -49,6 +53,10 @@ const productSchema = new mongoose.Schema({
     required: [true, "Stock is required"],
     min:      0,
     default:  0,
+  },
+  weight: {
+    type:    Number,
+    default: 0,
   },
   images: {
     type:    [String],
@@ -76,6 +84,15 @@ const productSchema = new mongoose.Schema({
     type:    [String],
     default: [],
   },
+    featured: {
+    type:    Boolean,
+    default: false,
+  },
+ 
+  salesCount: {
+    type:    Number,
+    default: 0,
+  },
   status: {
     type:    String,
     enum:    ["active", "draft", "inactive"],
@@ -86,8 +103,20 @@ const productSchema = new mongoose.Schema({
     warranty: { type: String, default: "N/A" },
     brand:    { type: String, default: "" },
   },
+   variants: [{
+    size:   { type: String, default: "" },
+    color:  { type: String, default: "" },
+    design: { type: String, default: "" },
+    price:  { type: Number, default: 0  },
+    stock:  { type: Number, default: 0  },
+    image:  { type: String, default: "" },
+  }],
 }, { timestamps: true });
 
-productSchema.index({ title: "text", category: 1, status: 1 });
+// ✅ Index for fast $in queries on categories array
+productSchema.index({ categories: 1 });
+productSchema.index({ category: 1 });
+productSchema.index({ title: "text" });
+productSchema.index({ status: 1 });
 
 module.exports = mongoose.model("Product", productSchema);

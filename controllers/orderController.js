@@ -18,8 +18,7 @@ const createOrder = asyncHandler(async (req, res) => {
     return res.status(400).json({ message: "Delivery address is required" });
   }
 
-  // ✅ FIX: Validate stock but skip if product not found in DB
-  // This handles cases where product ID is from old local data
+  // Validate stock
   const stockErrors = [];
   for (const item of items) {
     try {
@@ -28,7 +27,6 @@ const createOrder = asyncHandler(async (req, res) => {
         stockErrors.push(`Insufficient stock for ${item.title}`);
       }
     } catch (e) {
-      // Invalid product ID format — skip validation, still allow order
       console.log(`Product ID ${item.product} not found, skipping stock check`);
     }
   }
@@ -37,33 +35,61 @@ const createOrder = asyncHandler(async (req, res) => {
     return res.status(400).json({ message: stockErrors[0] });
   }
 
-  // ✅ Create order — works for both guests and logged-in users
+  // ✅ Enrich items with SKU from Product DB
+  const enrichedItems = await Promise.all(
+    items.map(async (item) => {
+      try {
+        const product = await Product.findById(item.product).select("sku");
+        return { ...item, sku: item.sku || product?.sku || "" };
+      } catch {
+        return { ...item, sku: item.sku || "" };
+      }
+    })
+  );
+
   const order = await Order.create({
-    user:            req.user?._id || null,
+    user:          req.user?._id || null,
     customerInfo,
     deliveryAddress,
-    items,
-    subtotal:        Number(subtotal) || 0,
-    shipping:        Number(shipping) || 0,
-    total:           Number(total)    || 0,
-    paymentMethod:   paymentMethod    || "cod",
-    paymentStatus:   paymentMethod === "cod" ? "pending" : "paid",
+    items:         enrichedItems,
+    subtotal:      Number(subtotal) || 0,
+    shipping:      Number(shipping) || 0,
+    total:         Number(total)    || 0,
+    paymentMethod: paymentMethod    || "cod",
+    paymentStatus: paymentMethod === "cod" ? "pending" : "paid",
   });
 
-  // ✅ Deduct stock for valid products only
+  // Deduct stock
   for (const item of items) {
     try {
       await Product.findByIdAndUpdate(item.product, {
-        $inc: { stock: -item.quantity },
+        $inc: { stock: -item.quantity,salesCount: item.quantity },
       });
     } catch (e) {
       console.log(`Could not update stock for product ${item.product}`);
     }
   }
 
+  // ✅ Send emails (non-critical — won't break order if email fails)
+  try {
+    const { sendOrderEmail } = require("../utils/sendEmail");
+    await sendOrderEmail({
+      to:      order.customerInfo.email,
+      subject: `Order Confirmed: ${order.orderId}`,
+      order,
+    });
+    await sendOrderEmail({
+      to:      process.env.ADMIN_NOTIFY_EMAIL,
+      subject: `New Order: ${order.orderId} — ₹${order.total}`,
+      order,
+    });
+  } catch (emailErr) {
+    console.log("Email failed (non-critical):", emailErr.message);
+  }
+
   console.log(`✅ New order created: ${order.orderId} — ${customerInfo.name} — ₹${total}`);
   res.status(201).json(order);
-});
+}); // ✅ FIX: closing brace was missing — getAllOrders was inside createOrder
 
 // ─── GET /api/orders — Admin only ────────────────────────────────────────────
 const getAllOrders = asyncHandler(async (req, res) => {
@@ -102,7 +128,10 @@ const getOrderById = asyncHandler(async (req, res) => {
 // ─── PUT /api/orders/:id/status — Admin only ─────────────────────────────────
 const updateOrderStatus = asyncHandler(async (req, res) => {
   const { status } = req.body;
-  const validStatuses = ["Processing", "Shipped", "Delivered", "Cancelled"];
+  const validStatuses = [
+    "Processing", "Ready to Ship", "Shipped",
+    "Delivered", "Cancelled", "Refund Processed",
+  ];
 
   if (!validStatuses.includes(status)) {
     return res.status(400).json({ message: "Invalid status" });

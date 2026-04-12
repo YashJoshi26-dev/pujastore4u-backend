@@ -1,11 +1,12 @@
 const mongoose = require("mongoose");
 
 const orderItemSchema = new mongoose.Schema({
-  product:  { type: mongoose.Schema.Types.ObjectId, ref: "Product", required: true },
-  title:    { type: String, required: true },
-  image:    { type: String, default: "" },
-  price:    { type: Number, required: true },
+  product: { type: mongoose.Schema.Types.ObjectId, ref: "Product", required: true },
+  title: { type: String, required: true },
+  image: { type: String, default: "" },
+  price: { type: Number, required: true },
   quantity: { type: Number, required: true, min: 1 },
+  sku: { type: String, default: "" },
 });
 
 const orderSchema = new mongoose.Schema({
@@ -16,15 +17,15 @@ const orderSchema = new mongoose.Schema({
   },
   // Customer info (for both guests and logged-in users)
   customerInfo: {
-    name:    { type: String, required: true },
-    email:   { type: String, required: true },
-    phone:   { type: String, required: true },
+    name: { type: String, required: true },
+    email: { type: String, required: true },
+    phone: { type: String, required: true },
   },
   // Delivery address
   deliveryAddress: {
     address: { type: String, required: true },
-    city:    { type: String, required: true },
-    state:   { type: String, default: "" },
+    city: { type: String, required: true },
+    state: { type: String, default: "" },
     pincode: { type: String, required: true },
   },
   // Order items
@@ -33,7 +34,7 @@ const orderSchema = new mongoose.Schema({
   // Pricing
   subtotal: { type: Number, required: true },
   shipping: { type: Number, default: 0 },
-  total:    { type: Number, required: true },
+  total: { type: Number, required: true },
 
   // Payment
   paymentMethod: {
@@ -47,13 +48,15 @@ const orderSchema = new mongoose.Schema({
     default: "pending",
   },
 
-  // Order status
   status: {
     type: String,
-    enum: ["Processing", "Shipped", "Delivered", "Cancelled"],
+    enum: ["Processing", "Ready to Ship", "Shipped", "Delivered", "Cancelled", "Refund Processed"],
     default: "Processing",
   },
 
+  logisticPartner: { type: String, default: "" },
+  trackingNumber: { type: String, default: "" },
+  deliveryTime: { type: String, default: "5-7 business days" },
   // Auto-generated order ID like #ORD-9812
   orderId: {
     type: String,
