@@ -47,6 +47,9 @@ const orderSchema = new mongoose.Schema({
     enum: ["pending", "paid", "failed"],
     default: "pending",
   },
+  razorpayOrderId: { type: String, default: "" },
+  razorpayPaymentId: { type: String, default: "" },
+  razorpaySignature: { type: String, default: "" },
 
   status: {
     type: String,
@@ -59,18 +62,39 @@ const orderSchema = new mongoose.Schema({
   deliveryTime: { type: String, default: "5-7 business days" },
   // Auto-generated order ID like #ORD-9812
   orderId: {
-    type: String,
-    unique: true,
-  },
+  type: String,
+  unique: true,
+},
+invoiceNumber: {
+  type: String,
+  unique: true,
+  sparse: true,
+},
 }, { timestamps: true });
 
-// ─── Auto-generate orderId before saving ──────────────────────────────────────
 orderSchema.pre("save", async function (next) {
   if (!this.orderId) {
     const count = await mongoose.model("Order").countDocuments();
     this.orderId = `#ORD-${1000 + count + 1}`;
   }
+  if (!this.invoiceNumber) {
+    const InvoiceCounter = mongoose.connection.collection("invoicecounters");
+    const currentYear = new Date().getFullYear();
+    const result = await InvoiceCounter.findOneAndUpdate(
+      { _id: "invoiceCounter" },
+      [{ $set: {
+          seq: { $cond: { if: { $eq: ["$year", currentYear] }, then: { $add: ["$seq", 1] }, else: 1001 } },
+          year: currentYear
+      }}],
+      { upsert: true, returnDocument: "after" }
+    );
+    const seq = result?.seq ?? 1001;
+    this.invoiceNumber = `2627/${String(seq).padStart(4, "0")}`;
+  }
   next();
 });
+
+
+
 
 module.exports = mongoose.model("Order", orderSchema);
