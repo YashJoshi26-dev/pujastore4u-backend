@@ -12,104 +12,108 @@ const VALID_CATEGORIES = [
 
 const productSchema = new mongoose.Schema({
   title: {
-    type:     String,
+    type: String,
     required: [true, "Product name is required"],
-    trim:     true,
+    trim: true,
   },
   description: {
-    type:    String,
+    type: String,
     default: "",
   },
 
   // ✅ MULTI-CATEGORY: array — product appears in all selected categories
   categories: {
-    type:    [String],
-    enum:    VALID_CATEGORIES,
+    type: [String],
+    enum: VALID_CATEGORIES,
     default: [],
   },
 
   // ✅ Keep single category for backward compat — always = categories[0]
   category: {
-    type:    String,
-    enum:    VALID_CATEGORIES,
+    type: String,
+    enum: VALID_CATEGORIES,
     default: "",
   },
 
   brand: {
-    type:    String,
+    type: String,
     default: "PoojaStore4u",
   },
   price: {
-    type:     Number,
+    type: Number,
     required: [true, "Price is required"],
-    min:      0,
+    min: 0,
   },
   oldPrice: {
-    type:    Number,
+    type: Number,
     default: null,
   },
   stock: {
-    type:     Number,
+    type: Number,
     required: [true, "Stock is required"],
-    min:      0,
-    default:  0,
+    min: 0,
+    default: 0,
   },
   weight: {
-    type:    Number,
+    type: Number,
     default: 0,
   },
   images: {
-    type:    [String],
+    type: [String],
     default: [],
   },
   image: {
-    type:    String,
+    type: String,
     default: "",
   },
   rating: {
-    type:    Number,
+    type: Number,
     default: 0,
-    min:     0,
-    max:     5,
+    min: 0,
+    max: 5,
   },
   reviews: {
-    type:    Number,
+    type: Number,
     default: 0,
   },
   sku: {
-    type:    String,
+    type: String,
     default: "",
+    sparse: true, 
   },
   tags: {
-    type:    [String],
+    type: [String],
     default: [],
   },
-    featured: {
-    type:    Boolean,
+  featured: {
+    type: Boolean,
     default: false,
   },
- 
+
   salesCount: {
-    type:    Number,
+    type: Number,
     default: 0,
   },
   status: {
-    type:    String,
-    enum:    ["active", "draft", "inactive"],
+    type: String,
+    enum: ["active", "draft", "inactive"],
     default: "active",
   },
   specifications: {
-    weight:   { type: String, default: "N/A" },
+    weight: { type: String, default: "N/A" },
     warranty: { type: String, default: "N/A" },
-    brand:    { type: String, default: "" },
+    brand: { type: String, default: "" },
   },
-   variants: [{
-    size:   { type: String, default: "" },
-    color:  { type: String, default: "" },
+  variants: [{
+    size: { type: String, default: "" },
+    color: { type: String, default: "" },
     design: { type: String, default: "" },
-    price:  { type: Number, default: 0  },
-    stock:  { type: Number, default: 0  },
-    image:  { type: String, default: "" },
+    sku: { type: String, default: "" },
+    price: { type: Number, default: 0 },   // selling price
+    mrp: { type: Number, default: 0 },   // MRP per variant
+    weight: { type: Number, default: 0 },   // weight per variant (internal only)
+    stock: { type: Number, default: 0 },
+    image: { type: String, default: "" },
   }],
 }, { timestamps: true });
 
@@ -118,5 +122,7 @@ productSchema.index({ categories: 1 });
 productSchema.index({ category: 1 });
 productSchema.index({ title: "text" });
 productSchema.index({ status: 1 });
+productSchema.index({ sku: 1 }, { unique: true, sparse: true });
+productSchema.index({ "variants.sku": 1 }, { unique: true, sparse: true });
 
 module.exports = mongoose.model("Product", productSchema);

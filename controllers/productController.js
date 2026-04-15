@@ -130,6 +130,10 @@ const createProduct = asyncHandler(async (req, res) => {
   const oldPriceNum = oldPrice ? Number(oldPrice) : null;
 
   if (!title)                           return res.status(400).json({ message: "Title is required" });
+  if (sku) {
+  const skuExists = await Product.findOne({ sku });
+  if (skuExists) return res.status(400).json({ message: `SKU "${sku}" already exists. Use a unique SKU.` });
+}
   if (isNaN(priceNum) || priceNum <= 0) return res.status(400).json({ message: "Valid price required" });
   if (!stock || isNaN(Number(stock)))   return res.status(400).json({ message: "Valid stock required" });
 
@@ -161,6 +165,10 @@ const createProduct = asyncHandler(async (req, res) => {
 
 // ─── PUT /api/products/:id ────────────────────────────────────────────────────
 const updateProduct = asyncHandler(async (req, res) => {
+  if (updates.sku) {
+  const skuExists = await Product.findOne({ sku: updates.sku, _id: { $ne: req.params.id } });
+  if (skuExists) return res.status(400).json({ message: `SKU "${updates.sku}" already exists. Use a unique SKU.` });
+}
   const product = await Product.findById(req.params.id);
   if (!product) return res.status(404).json({ message: "Product not found" });
 

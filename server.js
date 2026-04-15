@@ -18,6 +18,13 @@ app.use(cors({
   credentials: true,
 }));
 app.use(express.json());
+app.use("/api/payment/webhook",
+  express.raw({ type: "application/json" }),
+  (req, res, next) => {
+    if (Buffer.isBuffer(req.body)) req.body = JSON.parse(req.body.toString())
+    next()
+  }
+)
 app.use(express.urlencoded({ extended: true }));
 
 // ─── Routes ───────────────────────────────────────────────────────────────────
@@ -25,6 +32,8 @@ app.use("/api/auth",     require("./routes/authRoutes"));
 app.use("/api/products", require("./routes/productRoutes"));
 app.use("/api/orders",   require("./routes/orderRoutes"));
 app.use("/api/users",    require("./routes/userRoutes"));
+
+app.use("/api/payment", require("./routes/paymentRoutes"));
 
 // ─── Health check ─────────────────────────────────────────────────────────────
 app.get("/", (req, res) => {
