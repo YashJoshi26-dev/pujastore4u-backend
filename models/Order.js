@@ -77,20 +77,44 @@ orderSchema.pre("save", async function (next) {
     const count = await mongoose.model("Order").countDocuments();
     this.orderId = `#ORD-${1000 + count + 1}`;
   }
-  if (!this.invoiceNumber) {
-    const InvoiceCounter = mongoose.connection.collection("invoicecounters");
-    const currentYear = new Date().getFullYear();
-    const result = await InvoiceCounter.findOneAndUpdate(
-      { _id: "invoiceCounter" },
-      [{ $set: {
-          seq: { $cond: { if: { $eq: ["$year", currentYear] }, then: { $add: ["$seq", 1] }, else: 1001 } },
-          year: currentYear
-      }}],
-      { upsert: true, returnDocument: "after" }
-    );
-    const seq = result?.seq ?? 1001;
-    this.invoiceNumber = `2627/${String(seq).padStart(4, "0")}`;
+if (!this.invoiceNumber) {
+    try {
+      const InvoiceCounter = mongoose.connection.collection("invoicecounters");
+      const Order = mongoose.model("Order");
+      const currentYear = new Date().getFullYear();
+      let invoiceNumber = null;
+      let attempts = 0;
+
+      while (!invoiceNumber && attempts < 10) {
+        attempts++;
+        const result = await InvoiceCounter.findOneAndUpdate(
+          { _id: "invoiceCounter" },
+          [{ $set: {
+              seq: { $cond: { if: { $eq: ["$year", currentYear] }, then: { $add: ["$seq", 1] }, else: 1001 } },
+              year: currentYear
+          }}],
+          { upsert: true, returnDocument: "after" }
+        );
+
+        const doc = result?.value || result;
+        const seq = doc?.seq ?? 1001;
+        const candidate = `2627/${String(seq).padStart(4, "0")}`;
+
+        // Check if this invoice number already exists
+        const exists = await Order.findOne({ invoiceNumber: candidate });
+        if (!exists) {
+          invoiceNumber = candidate;
+        }
+      }
+
+      this.invoiceNumber = invoiceNumber || `2627/${Date.now().toString().slice(-4)}`;
+      console.log(`✅ Invoice number generated: ${this.invoiceNumber}`);
+    } catch (e) {
+      console.error("❌ Invoice number generation failed:", e.message);
+      this.invoiceNumber = `2627/${Date.now().toString().slice(-4)}`;
+    }
   }
+  
   next();
 });
 

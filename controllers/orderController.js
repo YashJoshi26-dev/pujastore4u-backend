@@ -23,9 +23,11 @@ const createOrder = asyncHandler(async (req, res) => {
   for (const item of items) {
     try {
       const product = await Product.findById(item.product);
-      if (product && product.stock < item.quantity) {
-        stockErrors.push(`Insufficient stock for ${item.title}`);
-      }
+if (product && product.stock <= 0) {
+  stockErrors.push(`${item.title} is out of stock`);
+} else if (product && product.stock < item.quantity) {
+  stockErrors.push(`Only ${product.stock} unit(s) available for ${item.title}`);
+}
     } catch (e) {
       console.log(`Product ID ${item.product} not found, skipping stock check`);
     }
@@ -137,11 +139,16 @@ const updateOrderStatus = asyncHandler(async (req, res) => {
     return res.status(400).json({ message: "Invalid status" });
   }
 
-  const order = await Order.findByIdAndUpdate(
-    req.params.id,
-    { status },
-    { new: true }
-  );
+  const { logisticPartner, trackingNumber } = req.body;
+const updateData = { status };
+if (logisticPartner !== undefined) updateData.logisticPartner = logisticPartner;
+if (trackingNumber  !== undefined) updateData.trackingNumber  = trackingNumber;
+
+const order = await Order.findByIdAndUpdate(
+  req.params.id,
+  updateData,
+  { new: true }
+);
 
   if (!order) return res.status(404).json({ message: "Order not found" });
 
