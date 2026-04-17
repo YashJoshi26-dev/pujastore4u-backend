@@ -165,14 +165,19 @@ const createProduct = asyncHandler(async (req, res) => {
 
 // ─── PUT /api/products/:id ────────────────────────────────────────────────────
 const updateProduct = asyncHandler(async (req, res) => {
-  if (updates.sku) {
-  const skuExists = await Product.findOne({ sku: updates.sku, _id: { $ne: req.params.id } });
-  if (skuExists) return res.status(400).json({ message: `SKU "${updates.sku}" already exists. Use a unique SKU.` });
-}
   const product = await Product.findById(req.params.id);
   if (!product) return res.status(404).json({ message: "Product not found" });
 
   const updates = { ...req.body };
+
+  // ✅ SKU uniqueness check — exclude current product
+  if (updates.sku && updates.sku.trim() !== "") {
+    const skuExists = await Product.findOne({
+      sku: updates.sku.trim(),
+      _id: { $ne: req.params.id },
+    });
+    if (skuExists) return res.status(400).json({ message: `SKU "${updates.sku}" already exists. Use a unique SKU.` });
+  }
 
   // ✅ Parse categories array on update
   if (updates.categories) {
@@ -187,12 +192,12 @@ const updateProduct = asyncHandler(async (req, res) => {
     updates.image    = updates.images[0] || "";
   }
 
-  if (updates.tags)           updates.tags     = JSON.parse(updates.tags);
-  if (updates.price)          updates.price    = Number(updates.price);
-  if (updates.oldPrice)       updates.oldPrice = Number(updates.oldPrice);
-  if (updates.stock)          updates.stock    = Number(updates.stock);
- if (updates.featured !== undefined)
- updates.featured = updates.featured === "true" || updates.featured === true;
+  if (updates.tags)     updates.tags     = JSON.parse(updates.tags);
+  if (updates.price)    updates.price    = Number(updates.price);
+  if (updates.oldPrice) updates.oldPrice = Number(updates.oldPrice);
+  if (updates.stock)    updates.stock    = Number(updates.stock);
+  if (updates.featured !== undefined)
+    updates.featured = updates.featured === "true" || updates.featured === true;
   if (updates.variants) updates.variants = JSON.parse(updates.variants);
 
   const updated = await Product.findByIdAndUpdate(

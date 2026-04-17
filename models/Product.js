@@ -123,6 +123,6 @@ productSchema.index({ category: 1 });
 productSchema.index({ title: "text" });
 productSchema.index({ status: 1 });
 productSchema.index({ sku: 1 }, { unique: true, sparse: true });
-productSchema.index({ "variants.sku": 1 }, { unique: true, sparse: true });
+
 
 module.exports = mongoose.model("Product", productSchema);
