@@ -22,11 +22,25 @@ const createOrder = asyncHandler(async (req, res) => {
   const stockErrors = [];
   for (const item of items) {
     try {
-      const product = await Product.findById(item.product);
-if (product && product.stock <= 0) {
-  stockErrors.push(`${item.title} is out of stock`);
-} else if (product && product.stock < item.quantity) {
-  stockErrors.push(`Only ${product.stock} unit(s) available for ${item.title}`);
+const product = await Product.findById(item.product);
+if (product) {
+  const variant = item.selectedVariant
+  let availableStock = product.stock
+
+  if (variant && (variant.size || variant.color || variant.design)) {
+    const matchedVariant = product.variants?.find(v =>
+      (!variant.size   || v.size   === variant.size)   &&
+      (!variant.color  || v.color  === variant.color)  &&
+      (!variant.design || v.design === variant.design)
+    )
+    if (matchedVariant) availableStock = matchedVariant.stock
+  }
+
+  if (availableStock <= 0) {
+    stockErrors.push(`${item.title} is out of stock`)
+  } else if (availableStock < item.quantity) {
+    stockErrors.push(`Only ${availableStock} unit(s) available for ${item.title}`)
+  }
 }
     } catch (e) {
       console.log(`Product ID ${item.product} not found, skipping stock check`);
@@ -38,16 +52,20 @@ if (product && product.stock <= 0) {
   }
 
   // ✅ Enrich items with SKU from Product DB
-  const enrichedItems = await Promise.all(
-    items.map(async (item) => {
-      try {
-        const product = await Product.findById(item.product).select("sku");
-        return { ...item, sku: item.sku || product?.sku || "" };
-      } catch {
-        return { ...item, sku: item.sku || "" };
-      }
-    })
-  );
+ const enrichedItems = await Promise.all(
+  items.map(async (item) => {
+    try {
+      const product = await Product.findById(item.product).select("sku");
+      return {
+        ...item,
+        sku: item.sku || product?.sku || "",
+        selectedVariant: item.selectedVariant || null,
+      };
+    } catch {
+      return { ...item, sku: item.sku || "", selectedVariant: item.selectedVariant || null };
+    }
+  })
+);
 
   const order = await Order.create({
     user:          req.user?._id || null,
@@ -62,15 +80,35 @@ if (product && product.stock <= 0) {
   });
 
   // Deduct stock
-  for (const item of items) {
-    try {
+ for (const item of items) {
+  try {
+    const variant = item.selectedVariant
+    if (variant && (variant.size || variant.color || variant.design)) {
+      // Deduct from matching variant stock
+      await Product.findOneAndUpdate(
+        {
+          _id: item.product,
+          "variants.size":   variant.size   || "",
+          "variants.color":  variant.color  || "",
+          "variants.design": variant.design || "",
+        },
+        {
+          $inc: {
+            "variants.$.stock": -item.quantity,
+            salesCount: item.quantity,
+          },
+        }
+      )
+    } else {
+      // No variant — deduct from main product stock
       await Product.findByIdAndUpdate(item.product, {
-        $inc: { stock: -item.quantity,salesCount: item.quantity },
-      });
-    } catch (e) {
-      console.log(`Could not update stock for product ${item.product}`);
+        $inc: { stock: -item.quantity, salesCount: item.quantity },
+      })
     }
+  } catch (e) {
+    console.log(`Could not update stock for product ${item.product}`)
   }
+}
 
   // ✅ Send emails (non-critical — won't break order if email fails)
   try {
