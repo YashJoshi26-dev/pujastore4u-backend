@@ -5,8 +5,8 @@ const VALID_CATEGORIES = [
   "Stationary", "Organisers", "Toys", "Decoration", "Gifting Products",
   "Jewellery", "Gardening", "KIDS Accessories", "Women Accessories",
   "Beauty & Body Care",
-  "Pujan Samagri", "Laddu Gopal Shringar", "Hanuman Ji Vastra",
-  "Radha Krishna Vastra", "Ganesh Ji Vastra", "Mata Chunri",
+  "Pujan Samagri", "Bhagwan Ji Vastra", "Bhagwan Ji Shringar",
+  "other",
   "Holi", "Raksha Bandhan", "Summer", "Winter", "Rainy",
 ];
 
