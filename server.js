@@ -1,40 +1,69 @@
-require("dotenv").config(); // ✅ MUST be absolute first line
+require("dotenv").config();
 
 const express   = require("express");
 const cors      = require("cors");
+const helmet    = require("helmet");
+const rateLimit = require("express-rate-limit");
 const connectDB = require("./config/db");
-
-// ─── Debug — should now show your MongoDB URI ─────────────────────────────────
-console.log("🔍 MONGO_URI:", process.env.MONGO_URI); // ✅ fixed: MONGO_URI not MONGODB_URI
 
 // ─── Connect to MongoDB ───────────────────────────────────────────────────────
 connectDB();
 
 const app = express();
 
-// ─── Middleware ───────────────────────────────────────────────────────────────
+// ─── Security Headers (helmet) ────────────────────────────────────────────────
+app.use(helmet());
+
+// ─── Rate Limiting ────────────────────────────────────────────────────────────
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100,                  // 100 requests per IP per 15 min
+  message: { message: "Too many requests, please try again later." },
+});
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10, // only 10 login attempts per 15 min
+  message: { message: "Too many login attempts, please try again later." },
+});
+app.use("/api/", limiter);
+app.use("/api/auth/login", authLimiter);
+
+// ─── CORS — only allow your domains ──────────────────────────────────────────
+const allowedOrigins = [
+  "http://localhost:5173",
+  "http://localhost:3000",
+  "https://poojastore4u.com",
+  "https://www.poojastore4u.com",
+];
 app.use(cors({
-  origin: ["http://localhost:5173", "http://localhost:3000"],
+  origin: (origin, callback) => {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error("Not allowed by CORS"));
+    }
+  },
   credentials: true,
 }));
-app.use(express.json());
+
+// ─── Body Parsers ─────────────────────────────────────────────────────────────
+app.use(express.json({ limit: "10mb" }));
 app.use("/api/payment/webhook",
   express.raw({ type: "application/json" }),
   (req, res, next) => {
-    if (Buffer.isBuffer(req.body)) req.body = JSON.parse(req.body.toString())
-    next()
+    if (Buffer.isBuffer(req.body)) req.body = JSON.parse(req.body.toString());
+    next();
   }
-)
+);
 app.use(express.urlencoded({ extended: true }));
 
 // ─── Routes ───────────────────────────────────────────────────────────────────
-app.use("/api/auth",     require("./routes/authRoutes"));
-app.use("/api/products", require("./routes/productRoutes"));
-app.use("/api/orders",   require("./routes/orderRoutes"));
+app.use("/api/auth",      require("./routes/authRoutes"));
+app.use("/api/products",  require("./routes/productRoutes"));
+app.use("/api/orders",    require("./routes/orderRoutes"));
 app.use("/api/dashboard", require("./routes/dashboardRoutes"));
-app.use("/api/users",    require("./routes/userRoutes"));
-
-app.use("/api/payment", require("./routes/paymentRoutes"));
+app.use("/api/users",     require("./routes/userRoutes"));
+app.use("/api/payment",   require("./routes/paymentRoutes"));
 
 // ─── Health check ─────────────────────────────────────────────────────────────
 app.get("/", (req, res) => {
@@ -46,17 +75,18 @@ app.use((req, res) => {
   res.status(404).json({ message: "Route not found" });
 });
 
-// ─── Global error handler ─────────────────────────────────────────────────────
+// ─── Global error handler — never leak stack trace in production ──────────────
 app.use((err, req, res, next) => {
   console.error(err.stack);
   res.status(err.status || 500).json({
     message: err.message || "Internal Server Error",
-    stack: process.env.NODE_ENV === "development" ? err.stack : undefined,
+    // ✅ stack only shown in development — never in production
+    ...(process.env.NODE_ENV === "development" && { stack: err.stack }),
   });
 });
 
 // ─── Start server ─────────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
-  console.log(`🚀 Server running on http://localhost:${PORT}`);
+  console.log(`🚀 Server running on port ${PORT}`);
 });
