@@ -19,34 +19,46 @@ const createOrder = asyncHandler(async (req, res) => {
   }
 
   // Validate stock
-  const stockErrors = [];
-  for (const item of items) {
-    try {
-const product = await Product.findById(item.product);
-if (product) {
-  const variant = item.selectedVariant
-  let availableStock = product.stock
+const stockErrors = [];
+for (const item of items) {
+  try {
+    const product = await Product.findById(item.product);
+    if (!product) continue;
 
-  if (variant && (variant.size || variant.color || variant.design)) {
-    const matchedVariant = product.variants?.find(v =>
-      (!variant.size   || v.size   === variant.size)   &&
-      (!variant.color  || v.color  === variant.color)  &&
-      (!variant.design || v.design === variant.design)
-    )
-    if (matchedVariant) availableStock = matchedVariant.stock
-  }
+    const variant = item.selectedVariant;
+    let availableStock = product.stock;
 
-  if (availableStock <= 0) {
-    stockErrors.push(`${item.title} is out of stock`)
-  } else if (availableStock < item.quantity) {
-    stockErrors.push(`Only ${availableStock} unit(s) available for ${item.title}`)
+    // ✅ If product has variants, ALWAYS check variant stock
+    if (product.variants?.length > 0) {
+      if (!variant || (!variant.size && !variant.color && !variant.design)) {
+        // No variant selected but product has variants — block
+        stockErrors.push(`Please select a variant for ${item.title}`);
+        continue;
+      }
+      const matchedVariant = product.variants.find(v =>
+        (variant.size   ? v.size   === variant.size   : true) &&
+        (variant.color  ? v.color  === variant.color  : true) &&
+        (variant.design ? v.design === variant.design : true)
+      );
+      if (!matchedVariant) {
+        stockErrors.push(`Selected variant not available for ${item.title}`);
+        continue;
+      }
+      availableStock = matchedVariant.stock;
+    }
+
+    // ✅ Block if out of stock
+    if (availableStock <= 0) {
+      stockErrors.push(`${item.title} is out of stock`);
+    }
+    // ✅ Block if quantity exceeds available stock
+    else if (item.quantity > availableStock) {
+      stockErrors.push(`Only ${availableStock} unit(s) left for "${item.title}". Please reduce quantity.`);
+    }
+  } catch (e) {
+    console.log(`Stock check failed for product ${item.product}:`, e.message);
   }
 }
-    } catch (e) {
-      console.log(`Product ID ${item.product} not found, skipping stock check`);
-    }
-  }
-
   if (stockErrors.length > 0) {
     return res.status(400).json({ message: stockErrors[0] });
   }
