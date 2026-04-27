@@ -7,7 +7,16 @@ const orderItemSchema = new mongoose.Schema({
   price: { type: Number, required: true },
   quantity: { type: Number, required: true, min: 1 },
   sku: { type: String, default: "" },
+  selectedVariant: {
+    size:   { type: String, default: "" },
+    color:  { type: String, default: "" },
+    design: { type: String, default: "" },
+  },
 });
+
+
+
+
 
 const orderSchema = new mongoose.Schema({
   user: {
