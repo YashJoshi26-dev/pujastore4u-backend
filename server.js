@@ -56,6 +56,7 @@ app.use("/api/payment/webhook",
   }
 );
 app.use(express.urlencoded({ extended: true }));
+app.use("/api/ai", require("./routes/aiRoutes"));
 
 // ─── Routes ───────────────────────────────────────────────────────────────────
 app.use("/api/auth",      require("./routes/authRoutes"));
