@@ -123,17 +123,17 @@ for (const item of items) {
 }
 
   // ✅ Send emails (non-critical — won't break order if email fails)
-// ✅ Send emails only for online payment (not COD)
-if (paymentMethod !== "cod") {
+  // ✅ Email sirf COD ke liye — online payment ki email verify ke baad jayegi
+if (paymentMethod === "cod") {
   try {
     const { sendOrderEmail } = require("../utils/sendEmail");
     await sendOrderEmail({
-      to:      order.customerInfo.email,
+      to: order.customerInfo.email,
       subject: `Order Confirmed: ${order.orderId}`,
       order,
     });
     await sendOrderEmail({
-      to:      process.env.ADMIN_NOTIFY_EMAIL,
+      to: process.env.ADMIN_NOTIFY_EMAIL,
       subject: `New Order: ${order.orderId} — ₹${order.total}`,
       order,
     });

@@ -83,6 +83,23 @@ exports.verifyPayment = async (req, res) => {
       return res.status(404).json({ success: false, message: "Order not found" });
     }
 
+    // ✅ Email sirf payment verify hone ke baad
+try {
+  const { sendOrderEmail } = require("../utils/sendEmail");
+  await sendOrderEmail({
+    to: updated.customerInfo.email,
+    subject: `Payment Confirmed: ${updated.orderId}`,
+    order: updated,
+  });
+  await sendOrderEmail({
+    to: process.env.ADMIN_NOTIFY_EMAIL,
+    subject: `Payment Received: ${updated.orderId} — ₹${updated.total}`,
+    order: updated,
+  });
+} catch (emailErr) {
+  console.log("Email failed (non-critical):", emailErr.message);
+}
+
     res.json({
       success:  true,
       message:  "Payment verified successfully",
