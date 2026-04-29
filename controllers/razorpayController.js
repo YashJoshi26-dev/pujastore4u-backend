@@ -12,14 +12,13 @@ const razorpay = new Razorpay({
 // POST /api/payment/create-order
 exports.createRazorpayOrder = async (req, res) => {
   try {
-    const { amount, orderId } = req.body; // amount in rupees, orderId = your DB order _id
+    const { amount, orderId } = req.body;
 
-    if (!amount || !orderId) {
+    if (!amount || !orderId)
       return res.status(400).json({ message: "amount and orderId are required" });
-    }
 
     const options = {
-      amount:   Math.round(amount * 100), // Razorpay needs paise
+      amount:   Math.round(amount * 100), // paise
       currency: "INR",
       receipt:  `receipt_${orderId}`,
       notes:    { orderId },
@@ -39,7 +38,7 @@ exports.createRazorpayOrder = async (req, res) => {
   }
 };
 
-// ─── 2. Verify Payment (HMAC SHA256) ─────────────────────────────────────────
+// ─── 2. Verify Payment ────────────────────────────────────────────────────────
 // POST /api/payment/verify
 exports.verifyPayment = async (req, res) => {
   try {
@@ -47,27 +46,33 @@ exports.verifyPayment = async (req, res) => {
       razorpay_order_id,
       razorpay_payment_id,
       razorpay_signature,
-      orderId, // your MongoDB order _id
+      orderId,
     } = req.body;
 
-    // ── Step 1: Verify signature ──────────────────────────────────────────────
-    const body      = razorpay_order_id + "|" + razorpay_payment_id;
-    const expected  = crypto
+    // ── Validate required fields ──────────────────────────────────────────────
+    if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature || !orderId) {
+      return res.status(400).json({ success: false, message: "Missing payment fields" });
+    }
+
+    // ── Verify HMAC signature ─────────────────────────────────────────────────
+    const body     = razorpay_order_id + "|" + razorpay_payment_id;
+    const expected = crypto
       .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
       .update(body)
       .digest("hex");
 
+    // ── Signature FAILED — mark order as failed, NO email ────────────────────
     if (expected !== razorpay_signature) {
-      // Signature mismatch — mark order as failed
       await Order.findByIdAndUpdate(orderId, {
-        paymentStatus: "failed",
+        paymentStatus:     "failed",
         razorpayOrderId:   razorpay_order_id,
         razorpayPaymentId: razorpay_payment_id,
       });
+      console.log(`❌ Payment verification failed for order ${orderId}`);
       return res.status(400).json({ success: false, message: "Payment verification failed" });
     }
 
-    // ── Step 2: Update order as paid ──────────────────────────────────────────
+    // ── Signature PASSED — mark order as paid ────────────────────────────────
     const updated = await Order.findByIdAndUpdate(
       orderId,
       {
@@ -83,29 +88,32 @@ exports.verifyPayment = async (req, res) => {
       return res.status(404).json({ success: false, message: "Order not found" });
     }
 
-    // ✅ Email sirf payment verify hone ke baad
-try {
-  const { sendOrderEmail } = require("../utils/sendEmail");
-  await sendOrderEmail({
-    to: updated.customerInfo.email,
-    subject: `Payment Confirmed: ${updated.orderId}`,
-    order: updated,
-  });
-  await sendOrderEmail({
-    to: process.env.ADMIN_NOTIFY_EMAIL,
-    subject: `Payment Received: ${updated.orderId} — ₹${updated.total}`,
-    order: updated,
-  });
-} catch (emailErr) {
-  console.log("Email failed (non-critical):", emailErr.message);
-}
+    // ── Send email ONLY after successful payment verification ─────────────────
+    try {
+      const { sendOrderEmail } = require("../utils/sendEmail");
+      await sendOrderEmail({
+        to:      updated.customerInfo.email,
+        subject: `Payment Confirmed: ${updated.orderId}`,
+        order:   updated,
+      });
+      await sendOrderEmail({
+        to:      process.env.ADMIN_NOTIFY_EMAIL,
+        subject: `Payment Received: ${updated.orderId} — ₹${updated.total}`,
+        order:   updated,
+      });
+      console.log(`📧 Payment confirmation email sent for ${updated.orderId}`);
+    } catch (emailErr) {
+      console.log("Email failed (non-critical):", emailErr.message);
+    }
 
+    console.log(`✅ Payment verified: ${updated.orderId} — ₹${updated.total}`);
     res.json({
-      success:  true,
-      message:  "Payment verified successfully",
-      orderId:  updated.orderId,  // your #ORD-XXXX
-      _id:      updated._id,
+      success: true,
+      message: "Payment verified successfully",
+      orderId: updated.orderId,
+      _id:     updated._id,
     });
+
   } catch (err) {
     console.error("Razorpay verify error:", err);
     res.status(500).json({ success: false, message: "Payment verification error" });
@@ -114,27 +122,26 @@ try {
 
 // ─── 3. Webhook Handler ───────────────────────────────────────────────────────
 // POST /api/payment/webhook
-// Must use raw body — set up in server.js BEFORE express.json()
 exports.webhookHandler = async (req, res) => {
   try {
-    const webhookSecret   = process.env.RAZORPAY_WEBHOOK_SECRET;
-    const receivedSig     = req.headers["x-razorpay-signature"];
-    const body            = JSON.stringify(req.body);
+    const webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET;
+    const receivedSig   = req.headers["x-razorpay-signature"];
 
     // ── Verify webhook signature ──────────────────────────────────────────────
-    const expectedSig = crypto
-      .createHmac("sha256", webhookSecret)
-      .update(body)
-      .digest("hex");
+    if (webhookSecret) {
+      const expectedSig = crypto
+        .createHmac("sha256", webhookSecret)
+        .update(JSON.stringify(req.body))
+        .digest("hex");
 
-    if (expectedSig !== receivedSig) {
-      return res.status(400).json({ message: "Invalid webhook signature" });
+      if (expectedSig !== receivedSig) {
+        return res.status(400).json({ message: "Invalid webhook signature" });
+      }
     }
 
     const event   = req.body.event;
     const payload = req.body.payload?.payment?.entity;
 
-    // ── Handle events ─────────────────────────────────────────────────────────
     if (event === "payment.captured") {
       const razorpayOrderId = payload.order_id;
       await Order.findOneAndUpdate(
