@@ -123,6 +123,8 @@ for (const item of items) {
 }
 
   // ✅ Send emails (non-critical — won't break order if email fails)
+// ✅ Send emails only for online payment (not COD)
+if (paymentMethod !== "cod") {
   try {
     const { sendOrderEmail } = require("../utils/sendEmail");
     await sendOrderEmail({
@@ -138,6 +140,7 @@ for (const item of items) {
   } catch (emailErr) {
     console.log("Email failed (non-critical):", emailErr.message);
   }
+}
 
   console.log(`✅ New order created: ${order.orderId} — ${customerInfo.name} — ₹${total}`);
   res.status(201).json(order);
