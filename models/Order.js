@@ -1,133 +1,197 @@
-const mongoose = require("mongoose");
+const asyncHandler = require("express-async-handler");
+const Order   = require("../models/Order");
+const Product = require("../models/Product");
 
-const orderItemSchema = new mongoose.Schema({
-  product: { type: mongoose.Schema.Types.ObjectId, ref: "Product", required: true },
-  title: { type: String, required: true },
-  image: { type: String, default: "" },
-  price: { type: Number, required: true },
-  quantity: { type: Number, required: true, min: 1 },
-  sku: { type: String, default: "" },
-  selectedVariant: {
-    size:   { type: String, default: "" },
-    color:  { type: String, default: "" },
-    design: { type: String, default: "" },
-  },
-});
+// ─── POST /api/orders — Public (guest + logged-in) ───────────────────────────
+const createOrder = asyncHandler(async (req, res) => {
+  const { customerInfo, deliveryAddress, items, subtotal, shipping, total, paymentMethod } = req.body;
 
+  if (!items || items.length === 0)
+    return res.status(400).json({ message: "No items in order" });
 
+  if (!customerInfo?.name || !customerInfo?.email || !customerInfo?.phone)
+    return res.status(400).json({ message: "Customer info is required" });
 
+  if (!deliveryAddress?.address || !deliveryAddress?.city || !deliveryAddress?.pincode)
+    return res.status(400).json({ message: "Delivery address is required" });
 
-
-const orderSchema = new mongoose.Schema({
-  user: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: "User",
-    default: null,   // null = guest checkout
-  },
-  // Customer info (for both guests and logged-in users)
-  customerInfo: {
-    name: { type: String, required: true },
-    email: { type: String, required: true },
-    phone: { type: String, required: true },
-  },
-  // Delivery address
-  deliveryAddress: {
-    address: { type: String, required: true },
-    city: { type: String, required: true },
-    state: { type: String, default: "" },
-    pincode: { type: String, required: true },
-  },
-  // Order items
-  items: [orderItemSchema],
-
-  // Pricing
-  subtotal: { type: Number, required: true },
-  shipping: { type: Number, default: 0 },
-  total: { type: Number, required: true },
-
-  // Payment
-  paymentMethod: {
-    type: String,
-    enum: ["upi", "card", "cod"],
-    required: true,
-  },
-  paymentStatus: {
-    type: String,
-    enum: ["pending", "paid", "failed"],
-    default: "pending",
-  },
-  razorpayOrderId: { type: String, default: "" },
-  razorpayPaymentId: { type: String, default: "" },
-  razorpaySignature: { type: String, default: "" },
-
-  status: {
-    type: String,
-    enum: ["Processing", "Ready to Ship", "Shipped", "Delivered", "Cancelled", "Refund Processed"],
-    default: "Processing",
-  },
-
-  logisticPartner: { type: String, default: "" },
-  trackingNumber: { type: String, default: "" },
-  deliveryTime: { type: String, default: "5-7 business days" },
-  // Auto-generated order ID like #ORD-9812
-  orderId: {
-  type: String,
-  unique: true,
-},
-invoiceNumber: {
-  type: String,
-  unique: true,
-  sparse: true,
-},
-}, { timestamps: true });
-
-orderSchema.pre("save", async function (next) {
-  if (!this.orderId) {
-    const count = await mongoose.model("Order").countDocuments();
-    this.orderId = `#ORD-${1000 + count + 1}`;
-  }
-if (!this.invoiceNumber) {
+  // ── Validate stock ────────────────────────────────────────────────────────
+  const stockErrors = [];
+  for (const item of items) {
     try {
-      const InvoiceCounter = mongoose.connection.collection("invoicecounters");
-      const Order = mongoose.model("Order");
-      const currentYear = new Date().getFullYear();
-      let invoiceNumber = null;
-      let attempts = 0;
+      const product = await Product.findById(item.product);
+      if (!product) continue;
 
-      while (!invoiceNumber && attempts < 10) {
-        attempts++;
-        const result = await InvoiceCounter.findOneAndUpdate(
-          { _id: "invoiceCounter" },
-          [{ $set: {
-              seq: { $cond: { if: { $eq: ["$year", currentYear] }, then: { $add: ["$seq", 1] }, else: 1001 } },
-              year: currentYear
-          }}],
-          { upsert: true, returnDocument: "after" }
-        );
+      const variant = item.selectedVariant;
+      let availableStock = product.stock;
 
-        const doc = result?.value || result;
-        const seq = doc?.seq ?? 1001;
-        const candidate = `2627/${String(seq).padStart(4, "0")}`;
-
-        // Check if this invoice number already exists
-        const exists = await Order.findOne({ invoiceNumber: candidate });
-        if (!exists) {
-          invoiceNumber = candidate;
+      if (product.variants?.length > 0) {
+        if (!variant || (!variant.size && !variant.color && !variant.design)) {
+          stockErrors.push(`Please select a variant for ${item.title}`);
+          continue;
         }
+        const matchedVariant = product.variants.find(v =>
+          (variant.size   ? v.size   === variant.size   : true) &&
+          (variant.color  ? v.color  === variant.color  : true) &&
+          (variant.design ? v.design === variant.design : true)
+        );
+        if (!matchedVariant) {
+          stockErrors.push(`Selected variant not available for ${item.title}`);
+          continue;
+        }
+        availableStock = matchedVariant.stock;
       }
 
-      this.invoiceNumber = invoiceNumber || `2627/${Date.now().toString().slice(-4)}`;
-      console.log(`✅ Invoice number generated: ${this.invoiceNumber}`);
+      if (availableStock <= 0)
+        stockErrors.push(`${item.title} is out of stock`);
+      else if (item.quantity > availableStock)
+        stockErrors.push(`Only ${availableStock} unit(s) left for "${item.title}". Please reduce quantity.`);
     } catch (e) {
-      console.error("❌ Invoice number generation failed:", e.message);
-      this.invoiceNumber = `2627/${Date.now().toString().slice(-4)}`;
+      console.log(`Stock check failed for product ${item.product}:`, e.message);
     }
   }
-  
-  next();
+
+  if (stockErrors.length > 0)
+    return res.status(400).json({ message: stockErrors[0] });
+
+  // ── Enrich items with SKU ─────────────────────────────────────────────────
+  const enrichedItems = await Promise.all(
+    items.map(async (item) => {
+      try {
+        const product = await Product.findById(item.product).select("sku");
+        return { ...item, sku: item.sku || product?.sku || "", selectedVariant: item.selectedVariant || null };
+      } catch {
+        return { ...item, sku: item.sku || "", selectedVariant: item.selectedVariant || null };
+      }
+    })
+  );
+
+  // ── Create order ──────────────────────────────────────────────────────────
+  const order = await Order.create({
+    user:          req.user?._id || null,
+    customerInfo,
+    deliveryAddress,
+    items:         enrichedItems,
+    subtotal:      Number(subtotal) || 0,
+    shipping:      Number(shipping) || 0,
+    total:         Number(total)    || 0,
+    paymentMethod: paymentMethod    || "cod",
+    // COD = pending payment, online = pending until Razorpay verify
+    paymentStatus: "pending",
+  });
+
+  // ── Deduct stock ──────────────────────────────────────────────────────────
+  for (const item of items) {
+    try {
+      const variant = item.selectedVariant;
+      if (variant && (variant.size || variant.color || variant.design)) {
+        await Product.findOneAndUpdate(
+          {
+            _id: item.product,
+            "variants.size":   variant.size   || "",
+            "variants.color":  variant.color  || "",
+            "variants.design": variant.design || "",
+          },
+          { $inc: { "variants.$.stock": -item.quantity, salesCount: item.quantity } }
+        );
+      } else {
+        await Product.findByIdAndUpdate(item.product, {
+          $inc: { stock: -item.quantity, salesCount: item.quantity },
+        });
+      }
+    } catch (e) {
+      console.log(`Could not update stock for product ${item.product}`);
+    }
+  }
+
+  // ── Send email ONLY for COD orders ────────────────────────────────────────
+  // Online payment emails are sent ONLY after Razorpay payment verification
+  if (paymentMethod === "cod") {
+    try {
+      const { sendOrderEmail } = require("../utils/sendEmail");
+      await sendOrderEmail({
+        to:      order.customerInfo.email,
+        subject: `Order Confirmed: ${order.orderId}`,
+        order,
+      });
+      await sendOrderEmail({
+        to:      process.env.ADMIN_NOTIFY_EMAIL,
+        subject: `New COD Order: ${order.orderId} — ₹${order.total}`,
+        order,
+      });
+      console.log(`📧 COD confirmation email sent for ${order.orderId}`);
+    } catch (emailErr) {
+      console.log("Email failed (non-critical):", emailErr.message);
+    }
+  }
+
+  console.log(`✅ New order created: ${order.orderId} — ${customerInfo.name} — ₹${total}`);
+  res.status(201).json(order);
 });
 
+// ─── GET /api/orders — Admin only ────────────────────────────────────────────
+const getAllOrders = asyncHandler(async (req, res) => {
+  const { status, search } = req.query;
+  const query = {};
+  if (status && status !== "All") query.status = status;
+  if (search) {
+    query.$or = [
+      { orderId: { $regex: search, $options: "i" } },
+      { "customerInfo.name":  { $regex: search, $options: "i" } },
+      { "customerInfo.email": { $regex: search, $options: "i" } },
+    ];
+  }
+  const orders = await Order.find(query).populate("user", "name email").sort({ createdAt: -1 });
+  res.json(orders);
+});
 
+// ─── GET /api/orders/my — Logged-in user ─────────────────────────────────────
+const getMyOrders = asyncHandler(async (req, res) => {
+  const orders = await Order.find({ user: req.user._id }).sort({ createdAt: -1 });
+  res.json(orders);
+});
 
+// ─── GET /api/orders/:id — Admin only ────────────────────────────────────────
+const getOrderById = asyncHandler(async (req, res) => {
+  const order = await Order.findById(req.params.id).populate("user", "name email");
+  if (!order) return res.status(404).json({ message: "Order not found" });
+  res.json(order);
+});
 
-module.exports = mongoose.model("Order", orderSchema);
+// ─── PUT /api/orders/:id/status — Admin only ─────────────────────────────────
+const updateOrderStatus = asyncHandler(async (req, res) => {
+  const { status } = req.body;
+  const validStatuses = ["Processing", "Ready to Ship", "Shipped", "Delivered", "Cancelled", "Refund Processed"];
+
+  if (!validStatuses.includes(status))
+    return res.status(400).json({ message: "Invalid status" });
+
+  const { logisticPartner, trackingNumber } = req.body;
+  const updateData = { status };
+  if (logisticPartner !== undefined) updateData.logisticPartner = logisticPartner;
+  if (trackingNumber  !== undefined) updateData.trackingNumber  = trackingNumber;
+
+  const order = await Order.findByIdAndUpdate(req.params.id, updateData, { new: true });
+  if (!order) return res.status(404).json({ message: "Order not found" });
+
+  console.log(`✅ Order ${order.orderId} status updated to ${status}`);
+  res.json(order);
+});
+
+// ─── GET /api/orders/stats — Admin dashboard ─────────────────────────────────
+const getOrderStats = asyncHandler(async (req, res) => {
+  const [totalOrders, delivered, shipped, revenue] = await Promise.all([
+    Order.countDocuments(),
+    Order.countDocuments({ status: "Delivered" }),
+    Order.countDocuments({ status: "Shipped" }),
+    Order.aggregate([{ $group: { _id: null, total: { $sum: "$total" } } }]),
+  ]);
+  res.json({
+    totalOrders,
+    delivered,
+    shipped,
+    totalRevenue: revenue[0]?.total || 0,
+  });
+});
+
+module.exports = { createOrder, getAllOrders, getMyOrders, getOrderById, updateOrderStatus, getOrderStats };
