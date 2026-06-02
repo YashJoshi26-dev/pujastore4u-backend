@@ -159,7 +159,7 @@ const getAllOrders = asyncHandler(async (req, res) => {
       { "customerInfo.email": { $regex: search, $options: "i" } },
     ];
   }
-
+  
   const orders = await Order.find(query)
     .populate("user", "name email")
     .sort({ createdAt: -1 });
