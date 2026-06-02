@@ -185,11 +185,40 @@ const updateProduct = asyncHandler(async (req, res) => {
     updates.category   = updates.categories[0] || product.category;
   }
 
-  if (req.files?.length > 0) {
-    const newImages  = await uploadAllFiles(req.files);
-    const existing   = (product.images || []).filter(Boolean);
-    updates.images   = [...existing, ...newImages];
-    updates.image    = updates.images[0] || "";
+ if (req.files?.length > 0) {
+    // ── NEW images uploaded → delete old from Cloudinary first ──
+    for (const imgUrl of (product.images || []).filter(Boolean)) {
+      try {
+        const afterUpload = imgUrl.split("/upload/")[1];
+        const publicId    = afterUpload.replace(/^v\d+\//, "").replace(/\.[^/.]+$/, "");
+        await cloudinary.uploader.destroy(publicId);
+      } catch (e) {
+        console.log("Cloudinary old image delete skipped:", e.message);
+      }
+    }
+    const newImages = await uploadAllFiles(req.files);
+    updates.images  = newImages;
+    updates.image   = newImages[0] || "";
+
+  } else if (req.body.removeImage === "true") {
+    // ── User clicked ✕ remove → delete from Cloudinary + hide product ──
+    for (const imgUrl of (product.images || []).filter(Boolean)) {
+      try {
+        const afterUpload = imgUrl.split("/upload/")[1];
+        const publicId    = afterUpload.replace(/^v\d+\//, "").replace(/\.[^/.]+$/, "");
+        await cloudinary.uploader.destroy(publicId);
+      } catch (e) {
+        console.log("Cloudinary remove skipped:", e.message);
+      }
+    }
+    updates.image  = "";
+    updates.images = [];
+    updates.status = "inactive"; // ✅ product listing se hide ho jaye
+
+  } else if (req.body.existingImage) {
+    // ── No change → keep existing image as-is ──
+    updates.image  = req.body.existingImage;
+    updates.images = product.images; // preserve array
   }
 
   if (updates.tags)     updates.tags     = JSON.parse(updates.tags);
